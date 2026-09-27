@@ -1,12 +1,13 @@
 import os
 import logging
 import sqlite3
+import asyncio
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
+from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN")
 CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN")
@@ -78,7 +79,7 @@ async def api_balance(user_id: int):
     bal = get_user_balance(user_id)
     return JSONResponse({"success": True, "balance": bal})
 
-# Создание инвойса на пополнение из чата бота (или по запросу)
+# Создание инвойса на пополнение из чата бота
 async def create_crypto_invoice_link(user_id: int, amount: float):
     if not CRYPTO_BOT_TOKEN:
         return None
@@ -100,7 +101,6 @@ async def create_crypto_invoice_link(user_id: int, amount: float):
 @app.post("/api/cryptobot_webhook")
 async def cryptobot_webhook(request: Request):
     data = await request.json()
-    # Проверяем, что это успешная оплата инвойса
     if data.get("update_type") == "invoice_paid":
         invoice = data.get("payload", {}).get("invoice", {})
         custom_payload = invoice.get("payload") # Здесь лежит наш user_id
@@ -111,7 +111,6 @@ async def cryptobot_webhook(request: Request):
             update_user_balance(user_id, amount_paid)
             logging.info(f"Баланс юзера {user_id} пополнен на {amount_paid} USDT через CryptoBot")
             
-            # Пытаемся отправить пользователю сообщение в Telegram об успехе
             try:
                 await bot.send_message(user_id, f"✅ Успешно! Ваш баланс пополнен на <b>{amount_paid} USDT</b>.", parse_mode="HTML")
             except Exception as e:
@@ -149,7 +148,6 @@ async def withdraw(request: Request):
         result = response.json()
          
         if result.get("ok"):
-            # Списываем средства с баланса в базе данных
             update_user_balance(user_id, -amount)
             return JSONResponse({"success": True})
         else:
@@ -161,7 +159,7 @@ async def withdraw(request: Request):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    get_user_balance(user_id) # Регистрируем юзера в базе с 0 балансом
+    get_user_balance(user_id) # Регистрация юзера с 0 балансом
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url=WEB_APP_URL))],
