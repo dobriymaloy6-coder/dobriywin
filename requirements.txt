@@ -1,1 +1,5 @@
-aiograms
+fastapi
+uvicorn
+aiogram
+httpx
+pydantic
