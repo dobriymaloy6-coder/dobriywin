@@ -10,7 +10,8 @@ from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN")
 CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN")
-WEB_APP_URL = "https://dobriywin.onrender.com"  # Убедитесь, что здесь ваш актуальный URL на Render
+# Укажите ваш точный адрес на Render
+WEB_APP_URL = "https://dobriywin.onrender.com" 
 
 logging.basicConfig(level=logging.INFO)
 
@@ -39,6 +40,27 @@ async def cmd_start(message: types.Message):
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    if not bot:
+        return {"status": "error"}
+    json_data = await request.json()
+    update = types.Update(**json_data)
+    await dp.feed_update(bot, update)
+    return {"status": "ok"}
+
+@app.on_event("startup")
+async def on_startup():
+    if bot:
+        webhook_url = f"{WEB_APP_URL}/webhook"
+        await bot.set_webhook(webhook_url, drop_pending_updates=True)
+        logging.info(f"Webhook successfully set to {webhook_url}")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    if bot:
+        await bot.delete_webhook()
 
 @app.post("/api/create_invoice")
 async def create_invoice(request: Request):
@@ -95,16 +117,3 @@ async def withdraw(request: Request):
         else:
             err_msg = result.get("error", {}).get("name", "Ошибка перевода в CryptoBot")
             return JSONResponse({"success": False, "error": err_msg})
-
-@app.on_event("startup")
-async def on_startup():
-    if bot:
-        try:
-            # Сбрасываем вебхуки и старые соединения, чтобы убрать ошибку Conflict
-            await bot.delete_webhook(drop_pending_updates=True)
-            asyncio.create_task(dp.start_polling(bot))
-            logging.info("Telegram bot started successfully via polling!")
-        except Exception as e:
-            logging.error(f"Failed to start bot polling: {e}")
-    else:
-        logging.error("BOT_TOKEN is missing! Telegram bot could not start.")
