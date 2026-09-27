@@ -8,10 +8,9 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 
-# 👉 Читаем настройки из переменных окружения Render
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN")
 CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN")
-WEB_APP_URL = "https://dobriywin.onrender.com"  # Ваша ссылка на Render
+WEB_APP_URL = "https://dobriywin.onrender.com"  # Убедитесь, что здесь ваш актуальный URL на Render
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,7 +20,6 @@ app = FastAPI()
 
 CRYPTO_API_URL = "https://pay.crypt.bot/api/"
 
-# 👉 Роут для главной страницы
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
     try:
@@ -42,7 +40,6 @@ async def cmd_start(message: types.Message):
         parse_mode="Markdown"
     )
 
-# Эндпоинт создания инвойса (пополнение)
 @app.post("/api/create_invoice")
 async def create_invoice(request: Request):
     if not CRYPTO_BOT_TOKEN:
@@ -69,7 +66,6 @@ async def create_invoice(request: Request):
         else:
             return JSONResponse({"error": "Не удалось создать счет в CryptoBot"}, status_code=400)
 
-# Эндпоинт вывода средств через CryptoBot (transfer)
 @app.post("/api/withdraw")
 async def withdraw(request: Request):
     if not CRYPTO_BOT_TOKEN:
@@ -100,12 +96,15 @@ async def withdraw(request: Request):
             err_msg = result.get("error", {}).get("name", "Ошибка перевода в CryptoBot")
             return JSONResponse({"success": False, "error": err_msg})
 
-# Запуск поллинга бота
 @app.on_event("startup")
 async def on_startup():
     if bot:
-        await bot.delete_webhook(drop_pending_updates=True)
-        asyncio.create_task(dp.start_polling(bot))
-        logging.info("Telegram bot started successfully via polling!")
+        try:
+            # Сбрасываем вебхуки и старые соединения, чтобы убрать ошибку Conflict
+            await bot.delete_webhook(drop_pending_updates=True)
+            asyncio.create_task(dp.start_polling(bot))
+            logging.info("Telegram bot started successfully via polling!")
+        except Exception as e:
+            logging.error(f"Failed to start bot polling: {e}")
     else:
         logging.error("BOT_TOKEN is missing! Telegram bot could not start.")
