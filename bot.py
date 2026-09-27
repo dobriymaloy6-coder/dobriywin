@@ -3,7 +3,7 @@ import logging
 import asyncio
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
@@ -11,7 +11,7 @@ from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 # 👉 Читаем настройки из переменных окружения Render
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN")
 CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN")
-WEB_APP_URL = "https://dobriywin.onrender.com"  # Ваша актуальная ссылка на Render
+WEB_APP_URL = "https://dobriywin.onrender.com"  # Ваша ссылка на Render
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,6 +20,15 @@ dp = Dispatcher()
 app = FastAPI()
 
 CRYPTO_API_URL = "https://pay.crypt.bot/api/"
+
+# 👉 Роут для главной страницы (отдает ваш index.html без ошибки Not Found)
+@app.get("/", response_class=HTMLResponse)
+async def serve_index():
+    try:
+        with open("index.html", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "<h3>Файл index.html не найден в корне проекта</h3>"
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -64,7 +73,6 @@ async def create_invoice(request: Request):
 @app.on_event("startup")
 async def on_startup():
     if bot:
-        # Убираем старые вебхуки, если они были, и запускаем polling в фоне
         await bot.delete_webhook(drop_pending_updates=True)
         asyncio.create_task(dp.start_polling(bot))
         logging.info("Telegram bot started successfully via polling!")
