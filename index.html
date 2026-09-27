@@ -35,7 +35,8 @@
 
     <!-- Game Container -->
     <main class="flex-1 flex flex-col justify-center my-4">
-        <div id="minesGrid" class="grid grid-cols-5 gap-2.5 bg-gray-900/60 p-3 rounded-2xl border border-gray-800 shadow-2xl">
+        <!-- Изменено на grid-cols-3 (поле 3х3 = 9 клеток) -->
+        <div id="minesGrid" class="grid grid-cols-3 gap-3 bg-gray-900/60 p-4 rounded-2xl border border-gray-800 shadow-2xl">
             <!-- Сетка ячеек -->
         </div>
 
@@ -88,7 +89,7 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
 
-        let balance = 10.00; // Стартовый демо-баланс для тестов (можно обнулить до 0)
+        let balance = 10.00; // Стартовый баланс (можно изменить на 0, когда подключите реальные депозиты)
         let isGameActive = false;
         let currentMultiplierVal = 1.0;
         let currentPotentialWin = 0;
@@ -101,9 +102,10 @@
         function initGrid() {
             const grid = document.getElementById('minesGrid');
             grid.innerHTML = '';
-            for (let i = 0; i < 25; i++) {
+            // 9 клеток для поля 3х3
+            for (let i = 0; i < 9; i++) {
                 const btn = document.createElement('button');
-                btn.className = 'mine-btn aspect-square bg-gray-800/80 rounded-xl flex items-center justify-center text-lg text-gray-500 font-bold border border-gray-700/50';
+                btn.className = 'mine-btn aspect-square bg-gray-800/80 rounded-xl flex items-center justify-center text-xl text-gray-500 font-bold border border-gray-700/50';
                 btn.disabled = true;
                 btn.onclick = () => clickCell(i, btn);
                 grid.appendChild(btn);
@@ -175,7 +177,7 @@
                 } else {
                     alert(data.error || 'Ошибка при выводе средств');
                 }
-            } catch (e) {
+            }ca (e) {
                 console.error(e);
                 alert('Ошибка связи с сервером вывода');
             }
@@ -183,8 +185,9 @@
 
         function generateMines(excludeIndex) {
             minePositions = [];
-            while (minePositions.length < 3) {
-                let randomPos = Math.floor(Math.random() * 25);
+            // 2 мины на поле 3х3 для идеального баланса сложности
+            while (minePositions.length < 2) {
+                let randomPos = Math.floor(Math.random() * 9);
                 if (randomPos !== excludeIndex && !minePositions.includes(randomPos)) {
                     minePositions.push(randomPos);
                 }
@@ -233,7 +236,7 @@
                 revealAllBoard(index, false);
             } else {
                 openedDiamonds++;
-                currentMultiplierVal += 0.3 * openedDiamonds;
+                currentMultiplierVal += 0.4 * openedDiamonds;
                 const bet = parseFloat(document.getElementById('betAmount').value);
                 currentPotentialWin = bet * currentMultiplierVal;
 
@@ -244,7 +247,7 @@
                 btn.className = 'mine-btn aspect-square bg-emerald-950/80 rounded-xl flex items-center justify-center border border-emerald-500 text-emerald-400';
                 btn.disabled = true;
 
-                if (openedDiamonds >= (25 - minePositions.length)) cashOutGame();
+                if (openedDiamonds >= (9 - minePositions.length)) cashOutGame();
             }
         }
 
