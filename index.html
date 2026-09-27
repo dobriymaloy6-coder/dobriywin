@@ -126,7 +126,7 @@
             const userId = tg.initDataUnsafe?.user?.id || 12345;
 
             try {
-                const response = await fetch('/api/create_invoice', {
+                const response = await fetch('https://dobriywin.onrender.com/api/create_invoice', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ amount: amt, user_id: userId })
@@ -159,7 +159,7 @@
             const userId = tg.initDataUnsafe?.user?.id || 12345;
 
             try {
-                const response = await fetch('/api/withdraw', {
+                const response = await fetch('https://dobriywin.onrender.com/api/withdraw', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ amount: amt, user_id: userId })
@@ -174,7 +174,7 @@
                 } else {
                     alert(data.error || 'Ошибка при выводе средств');
                 }
-            } catch (e) { // Исправлена опечатка с ca (e) на catch (e)
+            } catch (e) {
                 console.error(e);
                 alert('Ошибка связи с сервером вывода');
             }
