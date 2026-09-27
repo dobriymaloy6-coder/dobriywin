@@ -21,7 +21,7 @@ app = FastAPI()
 
 CRYPTO_API_URL = "https://pay.crypt.bot/api/"
 
-# 👉 Роут для главной страницы (отдает ваш index.html без ошибки Not Found)
+# 👉 Роут для главной страницы
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
     try:
@@ -42,7 +42,7 @@ async def cmd_start(message: types.Message):
         parse_mode="Markdown"
     )
 
-# Эндпоинт, куда игра отправляет запрос на создание счета для пополнения
+# Эндпоинт создания инвойса (пополнение)
 @app.post("/api/create_invoice")
 async def create_invoice(request: Request):
     if not CRYPTO_BOT_TOKEN:
@@ -69,7 +69,38 @@ async def create_invoice(request: Request):
         else:
             return JSONResponse({"error": "Не удалось создать счет в CryptoBot"}, status_code=400)
 
-# Запускаем фоновый поллинг бота при старте FastAPI приложения
+# Эндпоинт вывода средств через CryptoBot (transfer)
+@app.post("/api/withdraw")
+async def withdraw(request: Request):
+    if not CRYPTO_BOT_TOKEN:
+        return JSONResponse({"success": False, "error": "CryptoBot token not configured"}, status_code=500)
+        
+    data = await request.json()
+    amount = data.get("amount")
+    user_id = data.get("user_id")
+    
+    if not amount or not user_id:
+        return JSONResponse({"success": False, "error": "Неверные данные запроса"})
+
+    headers = {"Crypto-Pay-API-Token": CRYPTO_BOT_TOKEN}
+    payload = {
+        "user_id": int(user_id),
+        "asset": "USDT",
+        "amount": str(amount),
+        "spend_id": f"withdraw_{user_id}_{asyncio.get_event_loop().time()}"
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{CRYPTO_API_URL}transfer", json=payload, headers=headers)
+        result = response.json()
+         
+        if result.get("ok"):
+            return JSONResponse({"success": True})
+        else:
+            err_msg = result.get("error", {}).get("name", "Ошибка перевода в CryptoBot")
+            return JSONResponse({"success": False, "error": err_msg})
+
+# Запуск поллинга бота
 @app.on_event("startup")
 async def on_startup():
     if bot:
