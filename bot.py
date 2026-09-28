@@ -5,15 +5,15 @@ import sqlite3
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, Update
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiocryptopay import AioCryptoPay, Networks
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  
+TOKEN = "ВАШ_ТОКЕН_БОТА"  
+CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
@@ -82,7 +82,7 @@ async def cmd_start(message: types.Message):
     user = get_user_data(user_id)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Открыть DobriyWin (Мини-приложение)", web_app=WebAppInfo(url="https://dobriymaloy6-coder.github.io/dobriywin/"))],
+        [InlineKeyboardButton(text="🎮 Открыть DobriyWin (Мини-приложение)", web_app=WebAppInfo(url="https://ВАШ_GITHUB_USERNAME.github.io/ВАШ_РЕПОЗИТОРИЙ/"))],
         [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup"),
          InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw")],
         [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh")]
@@ -132,7 +132,6 @@ async def cb_withdraw(callback: types.CallbackQuery):
     if user['balance'] <= 0:
         await callback.message.answer("❌ У недостаточно средств для вывода.")
     else:
-        # Проверка правила: вывод не должен превышать общие правила платформы
         update_user_balance(callback.from_user.id, -user['balance'], is_dep=False)
         await callback.message.answer(
             f"📤 Заявка на вывод **{user['balance']:.2f} USDT** успешно обработана.",
@@ -141,7 +140,7 @@ async def cb_withdraw(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# --- FastAPI Эндпоинты для игр с жестким контролем 80/20 ---
+# --- API Эндпоинты для игр (Математика 80/20) ---
 
 @app.post("/api/get_balance")
 async def api_get_balance(request: Request):
@@ -156,22 +155,19 @@ async def api_update_balance(request: Request):
     user = get_user_data(data.get("user_id"))
     return JSONResponse({"success": True, "balance": user['balance']})
 
-# 1. Игра: Орел и решка (Строго 20% шанс на победу)
+# 1. Орел и Решка (Строго 20% шанс победы)
 @app.post("/api/game/coinflip")
 async def api_coinflip(request: Request):
     data = await request.json()
     user_id = data.get("user_id")
     bet = float(data.get("bet", 0))
-    choice = data.get("choice") # 'heads' или 'tails'
+    choice = data.get("choice")
     
     user = get_user_data(user_id)
     if user['balance'] < bet:
         return JSONResponse({"success": False, "error": "Недостаточно средств"})
 
-    # Списываем ставку
     update_user_balance(user_id, -bet)
-
-    # Жесткая математика: шанс выигрыша ровно 20% (0.2)
     is_win = random.random() < 0.2
     
     if is_win:
@@ -191,13 +187,13 @@ async def api_coinflip(request: Request):
         "balance": new_user['balance']
     })
 
-# 3. Игра: Апгрейдер (С учетом требования: в 80% случаев проигрыш, защита от крупных побед)
+# 3. Апгрейдер (Защита: шанс никогда не выше 20%)
 @app.post("/api/game/upgrader")
 async def api_upgrader(request: Request):
     data = await request.json()
     user_id = data.get("user_id")
     bet = float(data.get("bet", 0))
-    requested_chance = float(data.get("chance", 50)) # Пользователь выбирает шанс (например, 70%)
+    requested_chance = float(data.get("chance", 50))
     
     user = get_user_data(user_id)
     if user['balance'] < bet:
@@ -205,11 +201,7 @@ async def api_upgrader(request: Request):
 
     update_user_balance(user_id, -bet)
 
-    # Принудительное ограничение: реальный шанс игрока никогда не выше 20%, 
-    # даже если он выставил ползунок на 80%. Платформа всегда в приоритете.
     forced_chance = min(requested_chance, 20.0) 
-    
-    # Дополнительная проверка на крупные ставки (если ставка большая, режем шанс еще сильнее)
     if bet > 5.0:
         forced_chance = min(forced_chance, 10.0)
 
@@ -217,7 +209,6 @@ async def api_upgrader(request: Request):
     is_win = roll <= forced_chance
 
     if is_win:
-        # Множитель зависит от выбранного шанса
         multiplier = 95.0 / forced_chance
         win_amount = bet * multiplier
         update_user_balance(user_id, win_amount)
