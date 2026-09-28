@@ -20,6 +20,11 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
+# --- КОРНЕВОЙ МАРШРУТ (Убирает 404 ошибки от Render) ---
+@app.get("/")
+async def root():
+    return {"status": "DobriyWin backend is running!"}
+
 # Инициализация CryptoBot (MAIN_NET - для реальных денег, менять на TEST_NET для тестов)
 def get_cryptopay():
     return AioCryptoPay(token=CRYPTO_BOT_TOKEN, network=Networks.MAIN_NET)
