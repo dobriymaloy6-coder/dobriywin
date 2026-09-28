@@ -12,8 +12,8 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- НАСТРОЙКИ ---
-TOKEN = "ВАШ_ТОКЕН_БОТА"  
-CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  
+TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  
+CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
