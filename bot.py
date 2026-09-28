@@ -14,8 +14,8 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- НАСТРОЙКИ (ВВЕДИТЕ ВАШИ ТОКЕНЫ ЗДЕСЬ) ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  # Токен от @BotFather
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  # Токен от @CryptoBot
+TOKEN = "ВАШ_ТОКЕН_БОТА"  # Токен от @BotFather
+CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  # Токен от @CryptoBot
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
@@ -42,7 +42,7 @@ async def on_startup():
     await bot.set_webhook(webhook_url)
     logging.info(f"Webhook set to: {webhook_url}")
 
-# --- БАЗА ДАННЫХ SQLite ---
+# --- БАЗА ДАННЫХ SQLite (Внутри одного файла) ---
 def init_db():
     conn = sqlite3.connect("database.db", check_same_thread=False)
     cursor = conn.cursor()
@@ -133,14 +133,12 @@ async def cb_refresh(callback: types.CallbackQuery):
     )
     await callback.answer("Баланс обновлен!")
 
-# Шаг 1: Пользователь нажал "Пополнить" -> просим ввести сумму
 @dp.callback_query(F.data == "topup")
 async def cb_topup(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(DepositStates.waiting_for_amount)
     await callback.message.answer("💳 Введите сумму пополнения в **USDT** (например: `10` или `5.5`):", parse_mode="Markdown")
     await callback.answer()
 
-# Шаг 2: Получаем сумму от пользователя, создаем инвойс
 @dp.message(DepositStates.waiting_for_amount)
 async def process_deposit_amount(message: types.Message, state: FSMContext):
     try:
@@ -207,7 +205,7 @@ async def cb_withdraw(callback: types.CallbackQuery):
         except Exception as e:
             logging.error(e)
             update_user_balance(user_id, withdrawing_amount, is_dep=False)
-            await callback.message.answer("❌ Ошибка автоматического вывода. Убедитесь, что у вас есть чат с @CryptoBot.")
+            await callback.message.answer("❌ Ошибка автоматического вывода. Убедитесь, что у вас есть открытый диалог с @CryptoBot.")
     await callback.answer()
 
 
@@ -249,7 +247,7 @@ async def cryptobot_webhook(request: Request):
     return JSONResponse({"status": "ok"})
 
 
-# --- API Эндпоинты для игр (Математика 80/20) ---
+# --- API Эндпоинты для игр ---
 @app.post("/api/get_balance")
 async def api_get_balance(request: Request):
     data = await request.json()
@@ -320,6 +318,37 @@ async def api_upgrader(request: Request):
         "win": is_win,
         "roll": round(roll, 2),
         "chance_used": forced_chance,
+        "win_amount": win_amount,
+        "balance": new_user['balance']
+    })
+
+@app.post("/api/game/mines")
+async def api_mines(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+    bet = float(data.get("bet", 0))
+    mines_count = int(data.get("mines_count", 3))
+    
+    user = get_user_data(user_id)
+    if user['balance'] < bet:
+        return JSONResponse({"success": False, "error": "Недостаточно средств"})
+
+    update_user_balance(user_id, -bet)
+    
+    # Логика для мин
+    is_win = random.random() < (0.4 / max(1, mines_count * 0.2))
+    
+    if is_win:
+        multiplier = 1.2 + (mines_count * 0.3)
+        win_amount = bet * multiplier
+        update_user_balance(user_id, win_amount)
+    else:
+        win_amount = 0.0
+
+    new_user = get_user_data(user_id)
+    return JSONResponse({
+        "success": True,
+        "win": is_win,
         "win_amount": win_amount,
         "balance": new_user['balance']
     })
