@@ -1,26 +1,24 @@
-import os
 import logging
 import sqlite3
-import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, HTMLResponse
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
-from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton, Update
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import uvicorn
+import asyncio
 
-TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN")
-CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN")
-WEB_APP_URL = "https://dobriywin.onrender.com"
+# --- НАСТРОЙКИ ---
+TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  # Замените на ваш токен Telegram-бота
+CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  # Замените на ваш токен от CryptoBot
 
 logging.basicConfig(level=logging.INFO)
-
-bot = Bot(token=TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else None
-dp = Dispatcher()
+bot = Bot(token=TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
-CRYPTO_API_URL = "https://pay.crypt.bot/api/"
-
-# --- БАЗА ДАННЫХ ---
+# --- БАЗА ДАННЫХ SQLite ---
 def init_db():
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
@@ -40,14 +38,17 @@ def get_user_balance(user_id: int) -> float:
     cursor = conn.cursor()
     cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
-    if not row:
-        cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, 0.0))
-        conn.commit()
-        balance = 0.0
-    else:
-        balance = row[0]
     conn.close()
-    return balance
+    if row:
+        return row[0]
+    else:
+        # Если пользователя нет в базе, создаем с нулевым балансом
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, balance) VALUES (?, 0.0)", (user_id,))
+        conn.commit()
+        conn.close()
+        return 0.0
 
 def update_user_balance(user_id: int, amount: float):
     conn = sqlite3.connect("database.db")
@@ -55,211 +56,85 @@ def update_user_balance(user_id: int, amount: float):
     cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if not row:
-        cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, amount))
+        cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, max(0.0, amount)))
     else:
-        new_balance = row[0] + amount
+        new_balance = max(0.0, row[0] + amount)
         cursor.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, user_id))
     conn.commit()
     conn.close()
 
-# --- ВЕБ-СЕРВЕР ---
 
-@app.get("/", response_class=HTMLResponse)
-async def serve_index():
-    try:
-        with open("index.html", "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "<h3>Файл index.html не найден в корне проекта</h3>"
-
-@app.get("/api/balance")
-async def api_balance(user_id: int):
-    bal = get_user_balance(user_id)
-    return JSONResponse({"success": True, "balance": bal})
-
-async def create_crypto_invoice_link(user_id: int, amount: float):
-    if not CRYPTO_BOT_TOKEN:
-        return None
-    headers = {"Crypto-Pay-API-Token": CRYPTO_BOT_TOKEN}
-    payload = {
-        "asset": "USDT",
-        "amount": str(amount),
-        "description": f"Пополнение баланса DobriyWin для ID: {user_id}",
-        "payload": str(user_id)
-    }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(f"{CRYPTO_API_URL}createInvoice", json=payload, headers=headers)
-        result = response.json()
-        if result.get("ok"):
-            return result["result"]["pay_url"]
-    return None
-
-# Исправленный вебхук для оплаты CryptoBot
-@app.post("/api/cryptobot_webhook")
-async def cryptobot_webhook(request: Request):
-    try:
-        data = await request.json()
-        logging.info(f"Получен вебхук от CryptoBot: {data}")
-        
-        if data.get("update_type") == "invoice_paid":
-            invoice = data.get("payload", {})
-            custom_payload = invoice.get("payload")
-            amount_paid = float(invoice.get("amount", 0))
-            
-            if custom_payload:
-                user_id = int(custom_payload)
-                update_user_balance(user_id, amount_paid)
-                logging.info(f"УСПЕХ! Баланс юзера {user_id} пополнен на {amount_paid} USDT")
-                
-                try:
-                    await bot.send_message(
-                        user_id, 
-                        f"✅ <b>Оплата получена!</b> Ваш баланс пополнен на <b>{amount_paid} USDT</b>.", 
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    logging.error(f"Не удалось отправить сообщение юзеру: {e}")
-                    
-    except Exception as e:
-        logging.error(f"Ошибка обработки вебхука: {e}")
-        
-    return JSONResponse({"status": "ok"})
-
-# --- ТЕЛЕГРАМ БОТ (Логика) ---
-
+# --- TELEGRAM БОТ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    bal = get_user_balance(user_id)
+    balance = get_user_balance(user_id)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url=WEB_APP_URL))],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu"), InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw_menu")],
-        [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh_balance")]
+        [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url="https://ВАШ_GITHUB_USERNAME.github.io/ВАШ_РЕПОЗИТОРИЙ/"))],
+        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup"),
+         InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw")],
+        [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh")]
     ])
+    
     await message.answer(
         f"👋 Добро пожаловать в **dobriywin**!\n\n"
-        f"💰 Ваш текущий баланс: <b>{bal:.2f} USDT</b>\n\n"
-        "Используйте кнопки ниже:",
+        f"💰 Ваш текущий баланс: **{balance:.2f} USDT**\n\n"
+        f"Используйте кнопки ниже:",
         reply_markup=keyboard,
-        parse_mode="HTML"
+        parse_mode="Markdown"
     )
 
-@dp.callback_query(lambda c: c.data == "refresh_balance")
-async def process_refresh(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    bal = get_user_balance(user_id)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url=WEB_APP_URL))],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu"), InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw_menu")],
-        [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh_balance")]
-    ])
-    try:
-        await callback.message.edit_text(
-            f"👋 Добро пожаловать в **dobriywin**!\n\n"
-            f"💰 Ваш текущий баланс: <b>{bal:.2f} USDT</b>\n\n"
-            "Используйте кнопки ниже:",
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-    except Exception:
-        pass
+@dp.callback_query(F.data == "refresh")
+async def cb_refresh(callback: types.CallbackQuery):
+    balance = get_user_balance(callback.from_user.id)
+    await callback.message.edit_text(
+        f"👋 Добро пожаловать в **dobriywin**!\n\n"
+        f"💰 Ваш текущий баланс: **{balance:.2f} USDT**\n\n"
+        f"Используйте кнопки ниже:",
+        reply_markup=callback.message.reply_markup,
+        parse_mode="Markdown"
+    )
     await callback.answer("Баланс обновлен!")
 
-@dp.callback_query(lambda c: c.data == "top_up_menu")
-async def process_topup_menu(callback: types.CallbackQuery):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ 1 USDT", callback_data="pay_1"), InlineKeyboardButton(text="➕ 5 USDT", callback_data="pay_5")],
-        [InlineKeyboardButton(text="➕ 10 USDT", callback_data="pay_10"), InlineKeyboardButton(text="➕ 25 USDT", callback_data="pay_25")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_home")]
-    ])
-    await callback.message.edit_text("Выберите сумму пополнения через CryptoBot:", reply_markup=keyboard)
-    await callback.answer()
 
-@dp.callback_query(lambda c: c.data == "withdraw_menu")
-async def process_withdraw_menu(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    bal = get_user_balance(user_id)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 Вывести весь баланс", callback_data="do_withdraw")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_home")]
-    ])
-    await callback.message.edit_text(f"📤 Меню вывода\n\nВаш баланс: <b>{bal:.2f} USDT</b>\nДля вывода всех средств нажмите кнопку ниже:", reply_markup=keyboard, parse_mode="HTML")
-    await callback.answer()
+# --- FASTAPI ЭНДПОИНТЫ ДЛЯ МИНИ-ПРИЛОЖЕНИЯ ---
 
-@dp.callback_query(lambda c: c.data == "do_withdraw")
-async def process_do_withdraw(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    bal = get_user_balance(user_id)
+@app.post("/api/get_balance")
+async def api_get_balance(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+    if not user_id:
+        return JSONResponse({"success": False, "error": "No user_id provided"})
+    balance = get_user_balance(user_id)
+    return JSONResponse({"success": True, "balance": balance})
+
+@app.post("/api/update_balance")
+async def api_update_balance(request: Request):
+    """Принимает изменение баланса (+ выигрыш или - проигрыш/ставка)"""
+    data = await request.json()
+    user_id = data.get("user_id")
+    amount = data.get("amount") # Например, -0.5 или +0.7
     
-    if bal <= 0:
-        await callback.answer("На балансе нет средств для вывода!", show_alert=True)
-        return
+    if not user_id or amount is None:
+        return JSONResponse({"success": False, "error": "Invalid data"})
+    
+    update_user_balance(user_id, float(amount))
+    new_balance = get_user_balance(user_id)
+    return JSONResponse({"success": True, "balance": new_balance})
 
-    if not CRYPTO_BOT_TOKEN:
-        await callback.answer("Ошибка конфигурации вывода", show_alert=True)
-        return
 
-    headers = {"Crypto-Pay-API-Token": CRYPTO_BOT_TOKEN}
-    payload = {
-        "user_id": user_id,
-        "asset": "USDT",
-        "amount": str(bal),
-        "spend_id": f"withdraw_{user_id}_{os.urandom(4).hex()}"
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(f"{CRYPTO_API_URL}transfer", json=payload, headers=headers)
-        result = response.json()
-         
-        if result.get("ok"):
-            update_user_balance(user_id, -bal)
-            await callback.message.edit_text(f"✅ Успешно! Выведено <b>{bal:.2f} USDT</b> на ваш CryptoBot.", parse_mode="HTML")
-        else:
-            err_msg = result.get("error", {}).get("name", "Ошибка перевода")
-            await callback.answer(f"Ошибка вывода: {err_msg}", show_alert=True)
-
-@dp.callback_query(lambda c: c.data == "back_home")
-async def process_back(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    bal = get_user_balance(user_id)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url=WEB_APP_URL))],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu"), InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw_menu")],
-        [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh_balance")]
-    ])
-    await callback.message.edit_text(
-        f"👋 Главное меню:\n\n💰 Баланс: <b>{bal:.2f} USDT</b>",
-        reply_markup=keyboard,
-        parse_mode="HTML"
+# --- ЗАПУСК ---
+async def main():
+    # Запускаем FastAPI в фоновом режиме (для работы вебхуков и API игры)
+    config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+    server = uvicorn.Server(config)
+    
+    # Запуск бота и сервера параллельно
+    await asyncio.gather(
+        dp.start_polling(bot),
+        server.serve()
     )
-    await callback.answer()
 
-@dp.callback_query(lambda c: c.data.startswith("pay_"))
-async def process_pay(callback: types.CallbackQuery):
-    amount = float(callback.data.split("_")[1])
-    user_id = callback.from_user.id
-    
-    pay_url = await create_crypto_invoice_link(user_id, amount)
-    if pay_url:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оплатить счет", url=pay_url)],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="top_up_menu")]
-        ])
-        await callback.message.edit_text(f"Счет на пополнение <b>{amount} USDT</b> создан.\nНажмите кнопку ниже для оплаты:", reply_markup=keyboard, parse_mode="HTML")
-    else:
-        await callback.answer("Ошибка создания счета в CryptoBot", show_alert=True)
-
-@app.post("/api/telegram_webhook")
-async def telegram_webhook(request: Request):
-    json_data = await request.json()
-    update = Update.model_validate(json_data, context={"bot": bot})
-    await dp.feed_update(bot, update)
-    return {"status": "ok"}
-
-@app.on_event("startup")
-async def on_startup():
-    if bot:
-        webhook_url = f"{WEB_APP_URL}/api/telegram_webhook"
-        await bot.set_webhook(webhook_url)
-        logging.info(f"Telegram Webhook установлен на: {webhook_url}")
+if __name__ == "__main__":
+    asyncio.run(main())
