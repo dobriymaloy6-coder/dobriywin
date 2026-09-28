@@ -21,7 +21,7 @@ app = FastAPI()
 
 CRYPTO_API_URL = "https://pay.crypt.bot/api/"
 
-# --- РАБОТА С БАЗОЙ ДАННЫХ (SQLite) ---
+# --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
@@ -63,7 +63,7 @@ def update_user_balance(user_id: int, amount: float):
     conn.commit()
     conn.close()
 
-# --- ВЕБ-СЕРВЕР (FastAPI для игры и CryptoBot Webhook) ---
+# --- ВЕБ-СЕРВЕР ---
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
@@ -73,13 +73,11 @@ async def serve_index():
     except FileNotFoundError:
         return "<h3>Файл index.html не найден в корне проекта</h3>"
 
-# API для получения баланса игрока в игре
 @app.get("/api/balance")
 async def api_balance(user_id: int):
     bal = get_user_balance(user_id)
     return JSONResponse({"success": True, "balance": bal})
 
-# Создание инвойса на пополнение из чата бота
 async def create_crypto_invoice_link(user_id: int, amount: float):
     if not CRYPTO_BOT_TOKEN:
         return None
@@ -88,7 +86,7 @@ async def create_crypto_invoice_link(user_id: int, amount: float):
         "asset": "USDT",
         "amount": str(amount),
         "description": f"Пополнение баланса DobriyWin для ID: {user_id}",
-        "payload": str(user_id) # Зашиваем user_id прямо в платеж
+        "payload": str(user_id)
     }
     async with httpx.AsyncClient() as client:
         response = await client.post(f"{CRYPTO_API_URL}createInvoice", json=payload, headers=headers)
@@ -97,81 +95,65 @@ async def create_crypto_invoice_link(user_id: int, amount: float):
             return result["result"]["pay_url"]
     return None
 
-# Вебхук, куда CryptoBot присылает уведомления об успешной оплате
 @app.post("/api/cryptobot_webhook")
 async def cryptobot_webhook(request: Request):
     data = await request.json()
     if data.get("update_type") == "invoice_paid":
         invoice = data.get("payload", {}).get("invoice", {})
-        custom_payload = invoice.get("payload") # Здесь лежит наш user_id
+        custom_payload = invoice.get("payload")
         amount_paid = float(invoice.get("amount", 0))
         
         if custom_payload:
             user_id = int(custom_payload)
             update_user_balance(user_id, amount_paid)
-            logging.info(f"Баланс юзера {user_id} пополнен на {amount_paid} USDT через CryptoBot")
-            
+            logging.info(f"Баланс юзера {user_id} пополнен на {amount_paid} USDT")
             try:
                 await bot.send_message(user_id, f"✅ Успешно! Ваш баланс пополнен на <b>{amount_paid} USDT</b>.", parse_mode="HTML")
             except Exception as e:
-                logging.error(f"Не удалось отправить сообщение о пополнении: {e}")
+                logging.error(f"Ошибка отправки сообщения: {e}")
                 
     return JSONResponse({"status": "ok"})
 
-# API вывода средств
-@app.post("/api/withdraw")
-async def withdraw(request: Request):
-    if not CRYPTO_BOT_TOKEN:
-        return JSONResponse({"success": False, "error": "CryptoBot token not configured"}, status_code=500)
-        
-    data = await request.json()
-    amount = float(data.get("amount", 0))
-    user_id = int(data.get("user_id", 0))
-    
-    if amount <= 0 or not user_id:
-        return JSONResponse({"success": False, "error": "Неверные данные"})
-
-    current_bal = get_user_balance(user_id)
-    if current_bal < amount:
-        return JSONResponse({"success": False, "error": "Недостаточно средств на балансе"})
-
-    headers = {"Crypto-Pay-API-Token": CRYPTO_BOT_TOKEN}
-    payload = {
-        "user_id": user_id,
-        "asset": "USDT",
-        "amount": str(amount),
-        "spend_id": f"withdraw_{user_id}_{os.urandom(4).hex()}"
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(f"{CRYPTO_API_URL}transfer", json=payload, headers=headers)
-        result = response.json()
-         
-        if result.get("ok"):
-            update_user_balance(user_id, -amount)
-            return JSONResponse({"success": True})
-        else:
-            err_msg = result.get("error", {}).get("name", "Ошибка перевода")
-            return JSONResponse({"success": False, "error": err_msg})
-
-# --- ТЕЛЕГРАМ БОТ (Команды и Кнопки) ---
+# --- ТЕЛЕГРАМ БОТ ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    get_user_balance(user_id) # Регистрация юзера с 0 балансом
+    bal = get_user_balance(user_id)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url=WEB_APP_URL))],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu")]
+        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu"), InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw_menu")],
+        [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh_balance")]
     ])
     await message.answer(
-        "👋 Добро пожаловать в **dobriywin**!\n\n"
-        "💎 Реальная игра на USDT.\n"
-        "Используйте кнопки ниже для игры и пополнения счета:",
+        f"👋 Добро пожаловать в **dobriywin**!\n\n"
+        f"💰 Ваш текущий баланс: <b>{bal:.2f} USDT</b>\n\n"
+        "Используйте кнопки ниже:",
         reply_markup=keyboard,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
+
+@dp.callback_query(lambda c: c.data == "refresh_balance")
+async def process_refresh(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    bal = get_user_balance(user_id)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url=WEB_APP_URL))],
+        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu"), InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw_menu")],
+        [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh_balance")]
+    ])
+    try:
+        await callback.message.edit_text(
+            f"👋 Добро пожаловать в **dobriywin**!\n\n"
+            f"💰 Ваш текущий баланс: <b>{bal:.2f} USDT</b>\n\n"
+            "Используйте кнопки ниже:",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await callback.answer("Баланс обновлен!")
 
 @dp.callback_query(lambda c: c.data == "top_up_menu")
 async def process_topup_menu(callback: types.CallbackQuery):
@@ -183,13 +165,63 @@ async def process_topup_menu(callback: types.CallbackQuery):
     await callback.message.edit_text("Выберите сумму пополнения через CryptoBot:", reply_markup=keyboard)
     await callback.answer()
 
+@dp.callback_query(lambda c: c.data == "withdraw_menu")
+async def process_withdraw_menu(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    bal = get_user_balance(user_id)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Вывести весь баланс", callback_data="do_withdraw")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_home")]
+    ])
+    await callback.message.edit_text(f"📤 Меню вывода\n\nВаш баланс: <b>{bal:.2f} USDT</b>\nДля вывода всех средств нажмите кнопку ниже:", reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "do_withdraw")
+async def process_do_withdraw(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    bal = get_user_balance(user_id)
+    
+    if bal <= 0:
+        await callback.answer("На балансе нет средств для вывода!", show_alert=True)
+        return
+
+    if not CRYPTO_BOT_TOKEN:
+        await callback.answer("Ошибка конфигурации вывода", show_alert=True)
+        return
+
+    headers = {"Crypto-Pay-API-Token": CRYPTO_BOT_TOKEN}
+    payload = {
+        "user_id": user_id,
+        "asset": "USDT",
+        "amount": str(bal),
+        "spend_id": f"withdraw_{user_id}_{os.urandom(4).hex()}"
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{CRYPTO_API_URL}transfer", json=payload, headers=headers)
+        result = response.json()
+         
+        if result.get("ok"):
+            update_user_balance(user_id, -bal)
+            await callback.message.edit_text(f"✅ Успешно! Выведено <b>{bal:.2f} USDT</b> на ваш CryptoBot.", parse_mode="HTML")
+        else:
+            err_msg = result.get("error", {}).get("name", "Ошибка перевода")
+            await callback.answer(f"Ошибка вывода: {err_msg}", show_alert=True)
+
 @dp.callback_query(lambda c: c.data == "back_home")
 async def process_back(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    bal = get_user_balance(user_id)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url=WEB_APP_URL))],
-        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu")]
+        [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="top_up_menu"), InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw_menu")],
+        [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh_balance")]
     ])
-    await callback.message.edit_text("Главное меню:", reply_markup=keyboard)
+    await callback.message.edit_text(
+        f"👋 Главное меню:\n\n💰 Баланс: <b>{bal:.2f} USDT</b>",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("pay_"))
