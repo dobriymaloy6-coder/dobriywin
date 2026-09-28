@@ -1,5 +1,5 @@
-fastapi
-uvicorn
-aiogram
-httpx
-pydantic
+aiogram>=3.0.0
+aiocryptopay>=0.3.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+pydantic>=2.0.0
