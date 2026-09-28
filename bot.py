@@ -10,8 +10,8 @@ import uvicorn
 import asyncio
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  # Замените на ваш токен Telegram-бота
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  # Замените на ваш токен от CryptoBot
+TOKEN = "ВАШ_ТОКЕН_БОТА"  # Замените на ваш токен Telegram-бота от BotFather
+CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  # Замените на ваш токен от CryptoBot
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
@@ -70,7 +70,7 @@ async def cmd_start(message: types.Message):
     balance = get_user_balance(user_id)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url="https://ВАШ_GITHUB_USERNAME.github.io/ВАШ_РЕПОЗИТОРИЙ/"))],
+        [InlineKeyboardButton(text="🎮 Играть в DobriyWin", web_app=WebAppInfo(url="https://dobriymaloy6-coder.github.io/dobriywin/"))],
         [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup"),
          InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw")],
         [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh")]
@@ -96,10 +96,30 @@ async def cb_refresh(callback: types.CallbackQuery):
     )
     await callback.answer("Баланс обновлен!")
 
+@dp.callback_query(F.data == "topup")
+async def cb_topup(callback: types.CallbackQuery):
+    await callback.message.answer(
+        "💳 Для пополнения баланса обратитесь к администратору или используйте интеграцию с CryptoBot.",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "withdraw")
+async def cb_withdraw(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    balance = get_user_balance(user_id)
+    if balance <= 0:
+        await callback.message.answer("❌ У вас недостаточно средств для вывода.")
+    else:
+        await callback.message.answer(
+            f"📤 Запрос на вывод средств на сумму **{balance:.2f} USDT** принят в обработку.",
+            parse_mode="Markdown"
+        )
+    await callback.answer()
+
 
 # --- FASTAPI ЭНДПОИНТЫ ---
 
-# 1. Обработчик входящих вебхуков от Telegram (убирает ошибку 404)
 @app.post("/api/telegram_webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -107,7 +127,6 @@ async def telegram_webhook(request: Request):
     await dp.feed_update(bot, update)
     return {"status": "ok"}
 
-# 2. Получение баланса для мини-приложения
 @app.post("/api/get_balance")
 async def api_get_balance(request: Request):
     data = await request.json()
@@ -117,7 +136,6 @@ async def api_get_balance(request: Request):
     balance = get_user_balance(user_id)
     return JSONResponse({"success": True, "balance": balance})
 
-# 3. Обновление баланса (ставка/выигрыш/проигрыш)
 @app.post("/api/update_balance")
 async def api_update_balance(request: Request):
     data = await request.json()
@@ -132,6 +150,6 @@ async def api_update_balance(request: Request):
     return JSONResponse({"success": True, "balance": new_balance})
 
 
-# --- ЗАПУСК ЧЕРЕЗ UVICORN (ДЛЯ ВЕБХУКОВ) ---
+# --- ЗАПУСК ---
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
