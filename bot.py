@@ -4,6 +4,8 @@ import random
 import sqlite3
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiocryptopay import AioCryptoPay, Networks
@@ -12,15 +14,19 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- НАСТРОЙКИ (ВВЕДИТЕ ВАШИ ТОКЕНЫ ЗДЕСЬ) ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  # Токен от @BotFather
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  # Токен от @CryptoBot
+TOKEN = "ВАШ_ТОКЕН_БОТА"  # Токен от @BotFather
+CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  # Токен от @CryptoBot
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
-# --- КОРНЕВОЙ МАРШРУТ (Убирает 404 ошибки от Render) ---
+# --- СОСТОЯНИЯ ДЛЯ FSM (Ввод суммы пополнения) ---
+class DepositStates(StatesGroup):
+    waiting_for_amount = State()
+
+# --- КОРНЕВОЙ МАРШРУТ ---
 @app.get("/")
 async def root():
     return {"status": "DobriyWin backend is running!"}
@@ -95,7 +101,8 @@ def update_user_balance(user_id: int, amount: float, is_dep: bool = False):
 
 # --- TELEGRAM БОТ ---
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     user = get_user_data(user_id)
     
@@ -126,12 +133,28 @@ async def cb_refresh(callback: types.CallbackQuery):
     )
     await callback.answer("Баланс обновлен!")
 
+# Шаг 1: Пользователь нажал "Пополнить" -> просим ввести сумму
 @dp.callback_query(F.data == "topup")
-async def cb_topup(callback: types.CallbackQuery):
+async def cb_topup(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(DepositStates.waiting_for_amount)
+    await callback.message.answer("💳 Введите сумму пополнения в **USDT** (например: `10` или `5.5`):", parse_mode="Markdown")
+    await callback.answer()
+
+# Шаг 2: Получаем сумму от пользователя, создаем инвойс
+@dp.message(DepositStates.waiting_for_amount)
+async def process_deposit_amount(message: types.Message, state: FSMContext):
+    try:
+        amount_to_pay = float(message.text.replace(",", "."))
+        if amount_to_pay <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Неверный формат. Пожалуйста, введите положительное число (например: `10`):", parse_mode="Markdown")
+        return
+
+    await state.clear()
+
     try:
         cryptopay = get_cryptopay()
-        amount_to_pay = 5.0  # Сумма пополнения по умолчанию в USDT
-        
         invoice = await cryptopay.create_invoice(
             asset='USDT', 
             amount=amount_to_pay, 
@@ -143,22 +166,21 @@ async def cb_topup(callback: types.CallbackQuery):
         conn = sqlite3.connect("database.db", check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("INSERT INTO invoices (invoice_id, user_id, amount, status) VALUES (?, ?, ?, ?)", 
-                       (invoice.invoice_id, callback.from_user.id, amount_to_pay, 'active'))
+                       (invoice.invoice_id, message.from_user.id, amount_to_pay, 'active'))
         conn.commit()
         conn.close()
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"💳 Оплатить {amount_to_pay} USDT", url=invoice.bot_invoice_url)]
         ])
-        await callback.message.answer(
-            "💳 Счет создан через CryptoBot. Нажмите кнопку ниже для оплаты. Баланс пополнится **мгновенно** после подтверждения:",
+        await message.answer(
+            f"💳 Счет на **{amount_to_pay} USDT** создан через CryptoBot. Нажмите кнопку ниже для оплаты:",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
     except Exception as e:
         logging.error(e)
-        await callback.message.answer("❌ Ошибка создания счета. Проверьте настройки CryptoBot.")
-    await callback.answer()
+        await message.answer("❌ Ошибка создания счета. Проверьте настройки CryptoBot.")
 
 @dp.callback_query(F.data == "withdraw")
 async def cb_withdraw(callback: types.CallbackQuery):
