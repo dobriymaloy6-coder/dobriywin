@@ -94,24 +94,35 @@ async def create_crypto_invoice_link(user_id: int, amount: float):
             return result["result"]["pay_url"]
     return None
 
-# Вебхук для оплаты CryptoBot
+# Исправленный вебхук для оплаты CryptoBot
 @app.post("/api/cryptobot_webhook")
 async def cryptobot_webhook(request: Request):
-    data = await request.json()
-    if data.get("update_type") == "invoice_paid":
-        invoice = data.get("payload", {}).get("invoice", {})
-        custom_payload = invoice.get("payload")
-        amount_paid = float(invoice.get("amount", 0))
+    try:
+        data = await request.json()
+        logging.info(f"Получен вебхук от CryptoBot: {data}")
         
-        if custom_payload:
-            user_id = int(custom_payload)
-            update_user_balance(user_id, amount_paid)
-            logging.info(f"Баланс юзера {user_id} пополнен на {amount_paid} USDT")
-            try:
-                await bot.send_message(user_id, f"✅ Успешно! Ваш баланс пополнен на <b>{amount_paid} USDT</b>.", parse_mode="HTML")
-            except Exception as e:
-                logging.error(f"Ошибка отправки сообщения: {e}")
+        if data.get("update_type") == "invoice_paid":
+            invoice = data.get("payload", {})
+            custom_payload = invoice.get("payload")
+            amount_paid = float(invoice.get("amount", 0))
+            
+            if custom_payload:
+                user_id = int(custom_payload)
+                update_user_balance(user_id, amount_paid)
+                logging.info(f"УСПЕХ! Баланс юзера {user_id} пополнен на {amount_paid} USDT")
                 
+                try:
+                    await bot.send_message(
+                        user_id, 
+                        f"✅ <b>Оплата получена!</b> Ваш баланс пополнен на <b>{amount_paid} USDT</b>.", 
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logging.error(f"Не удалось отправить сообщение юзеру: {e}")
+                    
+    except Exception as e:
+        logging.error(f"Ошибка обработки вебхука: {e}")
+        
     return JSONResponse({"status": "ok"})
 
 # --- ТЕЛЕГРАМ БОТ (Логика) ---
@@ -239,7 +250,6 @@ async def process_pay(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка создания счета в CryptoBot", show_alert=True)
 
-# Вебхук, куда Telegram сам присылает сообщения боту
 @app.post("/api/telegram_webhook")
 async def telegram_webhook(request: Request):
     json_data = await request.json()
@@ -247,7 +257,6 @@ async def telegram_webhook(request: Request):
     await dp.feed_update(bot, update)
     return {"status": "ok"}
 
-# Автоматическая установка Telegram Webhook при старте сервера
 @app.on_event("startup")
 async def on_startup():
     if bot:
