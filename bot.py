@@ -12,8 +12,8 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  
+TOKEN = "ВАШ_ТОКЕН_БОТА"  
+CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
@@ -138,6 +138,15 @@ async def cb_withdraw(callback: types.CallbackQuery):
             parse_mode="Markdown"
         )
     await callback.answer()
+
+
+# --- ПРИЕМ ВЕБХУКОВ ОТ TELEGRAM ---
+@app.post("/api/telegram_webhook")
+async def telegram_webhook(request: Request):
+    json_data = await request.json()
+    update = types.Update(**json_data)
+    await dp.feed_update(bot, update)
+    return JSONResponse({"status": "ok"})
 
 
 # --- API Эндпоинты для игр (Математика 80/20) ---
