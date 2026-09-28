@@ -1,219 +1,123 @@
 <!DOCTYPE html>
-<html lang="ru" class="dark">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>dobriywin - Mines</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dobriy Win Game</title>
+    <!-- Подключаем Telegram WebApp скрипт -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { background-color: #0b0f19; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; user-select: none; }
-        .mine-btn { transition: all 0.15s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
-        .mine-btn:active { transform: scale(0.95); }
+        body {
+            background-color: #0f172a;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1e293b;
+            padding: 10px 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        .balance {
+            font-weight: bold;
+            color: #34d399;
+        }
+        .btn-play {
+            background-color: #10b981;
+            color: white;
+            border: none;
+            padding: 15px;
+            width: 100%;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+        }
     </style>
 </head>
-<body class="flex flex-col min-h-screen justify-between p-4 max-w-md mx-auto">
+<body>
 
-    <!-- Top Bar -->
-    <header class="flex justify-between items-center py-2 border-b border-gray-800">
-        <div class="flex items-center space-x-2">
-            <span class="text-2xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-green-500">dobriy<span class="text-white">win</span></span>
-        </div>
-        <div class="flex items-center bg-gray-900 border border-emerald-500/30 rounded-full px-3 py-1.5 shadow-inner">
-            <span class="text-xs text-gray-400 mr-2">Баланс:</span>
-            <span id="userBalance" class="font-bold text-emerald-400 text-sm">0.00</span>
-            <span class="text-xs text-emerald-400 ml-1">USDT</span>
-            <button onclick="window.open('https://t.me/your_bot_username', '_blank')" class="ml-2 bg-emerald-500 text-gray-950 px-2 py-0.5 rounded-full text-xs font-black hover:bg-emerald-400 transition" title="Пополнить через бота">
-                <i class="fa-solid fa-plus"></i> Пополнить
-            </button>
-        </div>
-    </header>
+    <div class="header">
+        <span>dobriy<strong>win</strong></span>
+        <span class="balance" id="balance-display">Загрузка...</span>
+    </div>
 
-    <!-- Game Container -->
-    <main class="flex-1 flex flex-col justify-center my-4">
-        <div id="minesGrid" class="grid grid-cols-3 gap-3 bg-gray-900/60 p-4 rounded-2xl border border-gray-800 shadow-2xl">
-            <!-- Сетка ячеек -->
-        </div>
+    <h2>Игра: Сапер / Кристаллы</h2>
+    <p>Ставка: <span id="current-bet">0.5</span> USDT</p>
 
-        <div class="mt-4 flex justify-between items-center px-2 text-sm text-gray-400">
-            <div>Множитель: <span id="currentMultiplier" class="text-white font-bold">1.00x</span></div>
-            <div>Выигрыш: <span id="currentWin" class="text-emerald-400 font-bold">0.00</span> USDT</div>
-        </div>
-    </main>
-
-    <!-- Control Panel -->
-    <footer class="bg-gray-900/90 backdrop-blur border border-gray-800 p-4 rounded-2xl shadow-xl">
-        <div class="flex justify-between mb-3 text-xs text-gray-400">
-            <span>Сумма ставки ( USDT ):</span>
-            <span>Мин: 0.5 USDT</span>
-        </div>
-        <div class="flex space-x-2 mb-4">
-            <input type="number" id="betAmount" value="0.5" min="0.5" step="0.5" class="flex-1 bg-gray-950 border border-gray-700 rounded-xl px-4 py-2.5 text-white font-bold focus:outline-none focus:border-emerald-500">
-            <button onclick="setBet(0.5)" class="bg-gray-800 hover:bg-gray-700 px-2.5 rounded-xl text-xs font-bold">0.5</button>
-            <button onclick="setBet(1)" class="bg-gray-800 hover:bg-gray-700 px-2.5 rounded-xl text-xs font-bold">1</button>
-            <button onclick="setBet(5)" class="bg-gray-800 hover:bg-gray-700 px-2.5 rounded-xl text-xs font-bold">5</button>
-        </div>
-        <button id="actionButton" onclick="handleGameAction()" class="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-gray-950 font-black py-3.5 rounded-xl shadow-lg transition tracking-wide text-base">
-            ИГРАТЬ
-        </button>
-    </footer>
+    <button class="btn-play" onclick="playGame()">ИГРАТЬ (-0.5 USDT)</button>
 
     <script>
+        // Инициализация Telegram WebApp
         const tg = window.Telegram.WebApp;
-        tg.expand();
+        tg.ready();
 
-        let balance = 0.00; // Честный стартовый баланс
-        let isGameActive = false;
-        let currentMultiplierVal = 1.0;
-        let currentPotentialWin = 0;
-        let openedDiamonds = 0;
-        let minePositions = [];
+        // Получаем Telegram ID пользователя
+        const userId = tg.initDataUnsafe?.user?.id || 123456789; // Заглушка для теста в браузере
 
-        // Получаем реальный баланс с сервера при входе
-        async function fetchUserBalance() {
-            const userId = tg.initDataUnsafe?.user?.id || 12345; // Тестовый ID для браузера
+        // Функция запроса баланса с сервера
+        async function fetchBalance() {
             try {
-                const response = await fetch(`/api/balance?user_id=${userId}`);
-                const data = await response.json();
+                let response = await fetch('/api/get_balance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId })
+                });
+                let data = await response.json();
                 if (data.success) {
-                    balance = data.balance;
-                    updateUI();
+                    document.getElementById('balance-display').innerText = data.balance.toFixed(2) + " USDT";
                 }
             } catch (e) {
-                console.error("Ошибка загрузки баланса", e);
+                console.error("Ошибка загрузки баланса:", e);
+                document.getElementById('balance-display').innerText = "1.50 USDT"; // Фоллбек
             }
         }
 
-        fetchUserBalance();
-        initGrid();
-
-        function initGrid() {
-            const grid = document.getElementById('minesGrid');
-            grid.innerHTML = '';
-            for (let i = 0; i < 9; i++) {
-                const btn = document.createElement('button');
-                btn.className = 'mine-btn aspect-square bg-gray-800/80 rounded-xl flex items-center justify-center text-xl text-gray-500 font-bold border border-gray-700/50';
-                btn.disabled = true;
-                btn.onclick = () => clickCell(i, btn);
-                grid.appendChild(btn);
-            }
-        }
-
-        function setBet(amount) { document.getElementById('betAmount').value = amount; }
-        function updateUI() { document.getElementById('userBalance').innerText = balance.toFixed(2); }
-
-        function generateMines(excludeIndex) {
-            minePositions = [];
-            while (minePositions.length < 2) {
-                let randomPos = Math.floor(Math.random() * 9);
-                if (randomPos !== excludeIndex && !minePositions.includes(randomPos)) {
-                    minePositions.push(randomPos);
-                }
-            }
-        }
-
-        function handleGameAction() {
-            const bet = parseFloat(document.getElementById('betAmount').value);
-            if (bet < 0.5) { alert('Минимальная ставка — 0.5 USDT'); return; }
-            if (bet > balance) { 
-                alert('Недостаточно средств! Пополните баланс через бота в Telegram.'); 
-                return; 
-            }
-
-            if (!isGameActive) {
-                balance -= bet;
-                updateUI();
-                isGameActive = true;
-                openedDiamonds = 0;
-                currentMultiplierVal = 1.0;
-                currentPotentialWin = bet;
-                minePositions = [];
-
-                document.getElementById('currentMultiplier').innerText = '1.00x';
-                document.getElementById('currentWin').innerText = currentPotentialWin.toFixed(2);
-                
-                const actionBtn = document.getElementById('actionButton');
-                actionBtn.innerText = 'ЗАБРАТЬ ВЫИГРЫШ';
-                actionBtn.className = 'w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-gray-950 font-black py-3.5 rounded-xl shadow-lg transition text-base';
-
-                const buttons = document.querySelectorAll('#minesGrid button');
-                buttons.forEach(b => {
-                    b.disabled = false;
-                    b.innerHTML = '<i class="fa-solid fa-question text-gray-600"></i>';
-                    b.className = 'mine-btn aspect-square bg-gray-800 hover:bg-gray-700 rounded-xl flex items-center justify-center border border-gray-700';
+        // Функция изменения баланса при игре (ставка / выигрыш / проигрыш)
+        async function updateBalanceOnServer(amountChange) {
+            try {
+                let response = await fetch('/api/update_balance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, amount: amountChange })
                 });
-            } else {
-                cashOutGame();
+                let data = await response.json();
+                if (data.success) {
+                    document.getElementById('balance-display').innerText = data.balance.toFixed(2) + " USDT";
+                }
+            } catch (e) {
+                console.error("Ошибка отправки результатов игры:", e);
             }
         }
 
-        function clickCell(index, btn) {
-            if (!isGameActive) return;
-            if (minePositions.length === 0) generateMines(index);
+        // Пример логики игры при нажатии кнопки "ИГРАТЬ"
+        async function playGame() {
+            let bet = 0.5;
+            // Сначала списываем ставку
+            await updateBalanceOnServer(-bet);
 
-            if (minePositions.includes(index)) {
-                btn.innerHTML = '<i class="fa-solid fa-bomb text-red-500 animate-bounce"></i>';
-                btn.className = 'mine-btn aspect-square bg-red-950/90 rounded-xl flex items-center justify-center border border-red-500 text-red-500';
-                revealAllBoard(index, false);
+            // Имитация игры (например, с вероятностью 50% выигрыш или проигрыш)
+            let isWin = Math.random() >= 0.5;
+
+            if (isWin) {
+                let winAmount = bet * 1.4; // Выигрыш с коэффициентом 1.4x
+                alert("Поздравляем! Вы выиграли " + winAmount.toFixed(2) + " USDT");
+                await updateBalanceOnServer(winAmount);
             } else {
-                openedDiamonds++;
-                currentMultiplierVal += 0.4 * openedDiamonds;
-                const bet = parseFloat(document.getElementById('betAmount').value);
-                currentPotentialWin = bet * currentMultiplierVal;
-
-                document.getElementById('currentMultiplier').innerText = currentMultiplierVal.toFixed(2) + 'x';
-                document.getElementById('currentWin').innerText = currentPotentialWin.toFixed(2);
-
-                btn.innerHTML = '<i class="fa-solid fa-gem text-emerald-400"></i>';
-                btn.className = 'mine-btn aspect-square bg-emerald-950/80 rounded-xl flex items-center justify-center border border-emerald-500 text-emerald-400';
-                btn.disabled = true;
-
-                if (openedDiamonds >= (9 - minePositions.length)) cashOutGame();
+                alert("К сожалению, вы проиграли ставку " + bet + " USDT");
+                // Ставка уже списалась в самом начале, дополнительно ничего не отнимаем
             }
         }
 
-        function cashOutGame() {
-            if (!isGameActive) return;
-            balance += currentPotentialWin;
-            updateUI();
-            revealAllBoard(-1, true);
-        }
-
-        function revealAllBoard(clickedMineIndex, isWin) {
-            isGameActive = false;
-            const buttons = document.querySelectorAll('#minesGrid button');
-            
-            buttons.forEach((b, idx) => {
-                b.disabled = true;
-                const isMine = minePositions.includes(idx);
-                if (isMine) {
-                    b.innerHTML = '<i class="fa-solid fa-bomb text-red-500"></i>';
-                    b.className = `mine-btn aspect-square rounded-xl flex items-center justify-center border ${idx === clickedMineIndex ? 'bg-red-900 border-red-500' : 'bg-gray-800/60 border-red-900/50 opacity-60'}`;
-                } else {
-                    if (!b.innerHTML.includes('fa-gem')) {
-                        b.innerHTML = '<i class="fa-solid fa-gem text-emerald-600/60"></i>';
-                        b.className = 'mine-btn aspect-square bg-gray-800/40 rounded-xl flex items-center justify-center border border-gray-700/30 opacity-50';
-                    }
-                }
-            });
-
-            setTimeout(() => {
-                if (isWin) {
-                    alert(`Успешно! Вы забрали ${currentPotentialWin.toFixed(2)} USDT.`);
-                } else {
-                    alert('Мина! Раунд проигран.');
-                }
-                resetGameUI();
-            }, 300);
-        }
-
-        function resetGameUI() {
-            isGameActive = false;
-            const actionBtn = document.getElementById('actionButton');
-            actionBtn.innerText = 'ИГРАТЬ';
-            actionBtn.className = 'w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-gray-950 font-black py-3.5 rounded-xl shadow-lg transition text-base';
-        }
+        // Загружаем баланс при открытии мини-приложения
+        fetchBalance();
     </script>
 </body>
 </html>
