@@ -11,18 +11,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 
-# --- НАСТРОЙКИ ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  
+# --- НАСТРОЙКИ (ВВЕДИТЕ ВАШИ ТОКЕНЫ ЗДЕСЬ) ---
+TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  # Токен от @BotFather
+CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  # Токен от @CryptoBot
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
-# Инициализация CryptoBot (TEST_NET для тестов, менять на MAIN_NET для реальных денег)
+# Инициализация CryptoBot (MAIN_NET - для реальных денег, менять на TEST_NET для тестов)
 def get_cryptopay():
-    return AioCryptoPay(token=CRYPTO_BOT_TOKEN, network=Networks.TEST_NET)
+    return AioCryptoPay(token=CRYPTO_BOT_TOKEN, network=Networks.MAIN_NET)
 
 # --- АВТОМАТИЧЕСКАЯ УСТАНОВКА ВЕБХУКА ПРИ СТАРТЕ ---
 @app.on_event("startup")
@@ -43,7 +43,6 @@ def init_db():
             total_win REAL DEFAULT 0.0
         )
     """)
-    # Таблица для отслеживания инвойсов пополнения
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS invoices (
             invoice_id INTEGER PRIMARY KEY,
@@ -96,7 +95,7 @@ async def cmd_start(message: types.Message):
     user = get_user_data(user_id)
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Открыть DobriyWin (Мини-приложение)", web_app=WebAppInfo(url="https://ВАШ_GITHUB_USERNAME.github.io/ВАШ_РЕПОЗИТОРИЙ/"))],
+        [InlineKeyboardButton(text="🎮 Открыть DobriyWin (Мини-приложение)", web_app=WebAppInfo(url="https://dobriymaloy6-coder.github.io/dobriywin/"))],
         [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="topup"),
          InlineKeyboardButton(text="📤 Вывести средства", callback_data="withdraw")],
         [InlineKeyboardButton(text="🔄 Обновить баланс", callback_data="refresh")]
@@ -128,7 +127,6 @@ async def cb_topup(callback: types.CallbackQuery):
         cryptopay = get_cryptopay()
         amount_to_pay = 5.0  # Сумма пополнения по умолчанию в USDT
         
-        # Создаем инвойс с указанием адреса нашего вебхука для мгновенного ответа
         invoice = await cryptopay.create_invoice(
             asset='USDT', 
             amount=amount_to_pay, 
@@ -137,7 +135,6 @@ async def cb_topup(callback: types.CallbackQuery):
             paid_btn_url='https://t.me/DobriyWin_Bot'
         )
         
-        # Сохраняем инвойс в базу, чтобы привязать платеж к пользователю
         conn = sqlite3.connect("database.db", check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("INSERT INTO invoices (invoice_id, user_id, amount, status) VALUES (?, ?, ?, ?)", 
@@ -169,7 +166,6 @@ async def cb_withdraw(callback: types.CallbackQuery):
         update_user_balance(user_id, -withdrawing_amount, is_dep=False)
         
         try:
-            # Автоматическая выплата через CryptoBot API
             cryptopay = get_cryptopay()
             transfer = await cryptopay.transfer_aiocryptopay(
                 user_id=user_id,
@@ -183,7 +179,6 @@ async def cb_withdraw(callback: types.CallbackQuery):
             )
         except Exception as e:
             logging.error(e)
-            # Возвращаем баланс в случае ошибки перевода
             update_user_balance(user_id, withdrawing_amount, is_dep=False)
             await callback.message.answer("❌ Ошибка автоматического вывода. Убедитесь, что у вас есть чат с @CryptoBot.")
     await callback.answer()
@@ -197,7 +192,6 @@ async def telegram_webhook(request: Request):
     await dp.feed_update(bot, update)
     return JSONResponse({"status": "ok"})
 
-# Мгновенный вебхук от CryptoBot об успешной оплате
 @app.post("/api/cryptobot_webhook")
 async def cryptobot_webhook(request: Request):
     data = await request.json()
@@ -212,12 +206,10 @@ async def cryptobot_webhook(request: Request):
         
         if row and row[2] == 'active':
             user_id, amount, _ = row
-            # Зачисляем баланс игроку мгновенно
             update_user_balance(user_id, amount, is_dep=True)
             cursor.execute("UPDATE invoices SET status = 'paid' WHERE invoice_id = ?", (invoice_id,))
             conn.commit()
             
-            # Отправляем радостное уведомление игроку в Telegram
             try:
                 await bot.send_message(
                     chat_id=user_id,
@@ -231,7 +223,6 @@ async def cryptobot_webhook(request: Request):
 
 
 # --- API Эндпоинты для игр (Математика 80/20) ---
-
 @app.post("/api/get_balance")
 async def api_get_balance(request: Request):
     data = await request.json()
