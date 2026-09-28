@@ -3,15 +3,15 @@ import sqlite3
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, Update
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 import asyncio
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  # Замените на ваш токен Telegram-бота
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  # Замените на ваш токен от CryptoBot
+TOKEN = "ВАШ_ТОКЕН_БОТА"  # Замените на ваш токен Telegram-бота
+CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  # Замените на ваш токен от CryptoBot
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
@@ -42,7 +42,6 @@ def get_user_balance(user_id: int) -> float:
     if row:
         return row[0]
     else:
-        # Если пользователя нет в базе, создаем с нулевым балансом
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
         cursor.execute("INSERT OR IGNORE INTO users (user_id, balance) VALUES (?, 0.0)", (user_id,))
@@ -64,7 +63,7 @@ def update_user_balance(user_id: int, amount: float):
     conn.close()
 
 
-# --- TELEGRAM БОТ ---
+# --- TELEGRAM БОТ ХЕНДЛЕРЫ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
@@ -98,8 +97,17 @@ async def cb_refresh(callback: types.CallbackQuery):
     await callback.answer("Баланс обновлен!")
 
 
-# --- FASTAPI ЭНДПОИНТЫ ДЛЯ МИНИ-ПРИЛОЖЕНИЯ ---
+# --- FASTAPI ЭНДПОИНТЫ ---
 
+# 1. Обработчик входящих вебхуков от Telegram (убирает ошибку 404)
+@app.post("/api/telegram_webhook")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.model_validate(data, context={"bot": bot})
+    await dp.feed_update(bot, update)
+    return {"status": "ok"}
+
+# 2. Получение баланса для мини-приложения
 @app.post("/api/get_balance")
 async def api_get_balance(request: Request):
     data = await request.json()
@@ -109,12 +117,12 @@ async def api_get_balance(request: Request):
     balance = get_user_balance(user_id)
     return JSONResponse({"success": True, "balance": balance})
 
+# 3. Обновление баланса (ставка/выигрыш/проигрыш)
 @app.post("/api/update_balance")
 async def api_update_balance(request: Request):
-    """Принимает изменение баланса (+ выигрыш или - проигрыш/ставка)"""
     data = await request.json()
     user_id = data.get("user_id")
-    amount = data.get("amount") # Например, -0.5 или +0.7
+    amount = data.get("amount")
     
     if not user_id or amount is None:
         return JSONResponse({"success": False, "error": "Invalid data"})
@@ -124,17 +132,6 @@ async def api_update_balance(request: Request):
     return JSONResponse({"success": True, "balance": new_balance})
 
 
-# --- ЗАПУСК ---
-async def main():
-    # Запускаем FastAPI в фоновом режиме (для работы вебхуков и API игры)
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
-    server = uvicorn.Server(config)
-    
-    # Запуск бота и сервера параллельно
-    await asyncio.gather(
-        dp.start_polling(bot),
-        server.serve()
-    )
-
+# --- ЗАПУСК ЧЕРЕЗ UVICORN (ДЛЯ ВЕБХУКОВ) ---
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvicorn.run(app, host="0.0.0.0", port=8000)
