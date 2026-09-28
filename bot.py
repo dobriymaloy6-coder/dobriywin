@@ -12,20 +12,28 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- НАСТРОЙКИ ---
-TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  
-CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  
+TOKEN = "ВАШ_ТОКЕН_БОТА"  
+CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
+# Инициализация CryptoBot (TEST_NET для тестов, менять на MAIN_NET для реальных денег)
 def get_cryptopay():
     return AioCryptoPay(token=CRYPTO_BOT_TOKEN, network=Networks.TEST_NET)
 
+# --- АВТОМАТИЧЕСКАЯ УСТАНОВКА ВЕБХУКА ПРИ СТАРТЕ ---
+@app.on_event("startup")
+async def on_startup():
+    webhook_url = "https://dobriywin.onrender.com/api/telegram_webhook"
+    await bot.set_webhook(webhook_url)
+    logging.info(f"Webhook set to: {webhook_url}")
+
 # --- БАЗА ДАННЫХ SQLite ---
 def init_db():
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect("database.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -35,28 +43,34 @@ def init_db():
             total_win REAL DEFAULT 0.0
         )
     """)
+    # Таблица для отслеживания инвойсов пополнения
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS invoices (
+            invoice_id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            amount REAL,
+            status TEXT DEFAULT 'active'
+        )
+    """)
     conn.commit()
     conn.close()
 
 init_db()
 
 def get_user_data(user_id: int):
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect("database.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("SELECT balance, total_dep, total_win FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"balance": row[0], "total_dep": row[1], "total_win": row[2]}
-    else:
-        cursor = conn.cursor()
+    if not row:
         cursor.execute("INSERT INTO users (user_id, balance, total_dep, total_win) VALUES (?, 0.0, 0.0, 0.0)", (user_id,))
         conn.commit()
-        conn.close()
-        return {"balance": 0.0, "total_dep": 0.0, "total_win": 0.0}
+        row = (0.0, 0.0, 0.0)
+    conn.close()
+    return {"balance": row[0], "total_dep": row[1], "total_win": row[2]}
 
 def update_user_balance(user_id: int, amount: float, is_dep: bool = False):
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect("database.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("SELECT balance, total_dep, total_win FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
@@ -112,40 +126,107 @@ async def cb_refresh(callback: types.CallbackQuery):
 async def cb_topup(callback: types.CallbackQuery):
     try:
         cryptopay = get_cryptopay()
-        invoice = await cryptopay.create_invoice(asset='USDT', amount=5.0, description="Пополнение баланса DobriyWin")
+        amount_to_pay = 5.0  # Сумма пополнения по умолчанию в USDT
+        
+        # Создаем инвойс с указанием адреса нашего вебхука для мгновенного ответа
+        invoice = await cryptopay.create_invoice(
+            asset='USDT', 
+            amount=amount_to_pay, 
+            description="Пополнение баланса DobriyWin",
+            paid_btn_name='callback',
+            paid_btn_url='https://t.me/ВАШ_БОТ_USERNAME'
+        )
+        
+        # Сохраняем инвойс в базу, чтобы привязать платеж к пользователю
+        conn = sqlite3.connect("database.db", check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO invoices (invoice_id, user_id, amount, status) VALUES (?, ?, ?, ?)", 
+                       (invoice.invoice_id, callback.from_user.id, amount_to_pay, 'active'))
+        conn.commit()
+        conn.close()
+
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оплатить 5 USDT", url=invoice.bot_invoice_url)]
+            [InlineKeyboardButton(text=f"💳 Оплатить {amount_to_pay} USDT", url=invoice.bot_invoice_url)]
         ])
         await callback.message.answer(
-            "💳 Счет создан через CryptoBot. После оплаты ваш баланс пополнится автоматически:",
+            "💳 Счет создан через CryptoBot. Нажмите кнопку ниже для оплаты. Баланс пополнится **мгновенно** после подтверждения:",
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
     except Exception as e:
         logging.error(e)
-        await callback.message.answer("❌ Ошибка создания счета.")
+        await callback.message.answer("❌ Ошибка создания счета. Проверьте настройки CryptoBot.")
     await callback.answer()
 
 @dp.callback_query(F.data == "withdraw")
 async def cb_withdraw(callback: types.CallbackQuery):
-    user = get_user_data(callback.from_user.id)
+    user_id = callback.from_user.id
+    user = get_user_data(user_id)
     if user['balance'] <= 0:
-        await callback.message.answer("❌ У недостаточно средств для вывода.")
+        await callback.message.answer("❌ У вас недостаточно средств для вывода.")
     else:
-        update_user_balance(callback.from_user.id, -user['balance'], is_dep=False)
-        await callback.message.answer(
-            f"📤 Заявка на вывод **{user['balance']:.2f} USDT** успешно обработана.",
-            parse_mode="Markdown"
-        )
+        withdrawing_amount = user['balance']
+        update_user_balance(user_id, -withdrawing_amount, is_dep=False)
+        
+        try:
+            # Автоматическая выплата через CryptoBot API
+            cryptopay = get_cryptopay()
+            transfer = await cryptopay.transfer_aiocryptopay(
+                user_id=user_id,
+                asset='USDT',
+                amount=withdrawing_amount,
+                spend_id=f"withdraw_{user_id}_{random.randint(1000,9999)}"
+            )
+            await callback.message.answer(
+                f"📤 Успешно! Выведено **{withdrawing_amount:.2f} USDT** на ваш аккаунт CryptoBot.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(e)
+            # Возвращаем баланс в случае ошибки перевода
+            update_user_balance(user_id, withdrawing_amount, is_dep=False)
+            await callback.message.answer("❌ Ошибка автоматического вывода. Убедитесь, что у вас есть чат с @CryptoBot.")
     await callback.answer()
 
 
-# --- ПРИЕМ ВЕБХУКОВ ОТ TELEGRAM ---
+# --- ВЕБХУКИ ДЛЯ TELEGRAM И CRYPTOBOT ---
 @app.post("/api/telegram_webhook")
 async def telegram_webhook(request: Request):
     json_data = await request.json()
     update = types.Update(**json_data)
     await dp.feed_update(bot, update)
+    return JSONResponse({"status": "ok"})
+
+# Мгновенный вебхук от CryptoBot об успешной оплате
+@app.post("/api/cryptobot_webhook")
+async def cryptobot_webhook(request: Request):
+    data = await request.json()
+    if data.get("update_type") == "invoice_paid":
+        payload = data.get("payload", {})
+        invoice_id = payload.get("invoice_id")
+        
+        conn = sqlite3.connect("database.db", check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, amount, status FROM invoices WHERE invoice_id = ?", (invoice_id,))
+        row = cursor.fetchone()
+        
+        if row and row[2] == 'active':
+            user_id, amount, _ = row
+            # Зачисляем баланс игроку мгновенно
+            update_user_balance(user_id, amount, is_dep=True)
+            cursor.execute("UPDATE invoices SET status = 'paid' WHERE invoice_id = ?", (invoice_id,))
+            conn.commit()
+            
+            # Отправляем радостное уведомление игроку в Telegram
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=f"✅ Оплата прошла успешно! Ваш баланс пополнен на **{amount:.2f} USDT**.",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(e)
+        conn.close()
     return JSONResponse({"status": "ok"})
 
 
@@ -157,14 +238,6 @@ async def api_get_balance(request: Request):
     user = get_user_data(data.get("user_id", 0))
     return JSONResponse({"success": True, "balance": user['balance']})
 
-@app.post("/api/update_balance")
-async def api_update_balance(request: Request):
-    data = await request.json()
-    update_user_balance(data.get("user_id"), data.get("amount", 0), is_dep=True)
-    user = get_user_data(data.get("user_id"))
-    return JSONResponse({"success": True, "balance": user['balance']})
-
-# 1. Орел и Решка (Строго 20% шанс победы)
 @app.post("/api/game/coinflip")
 async def api_coinflip(request: Request):
     data = await request.json()
@@ -196,7 +269,6 @@ async def api_coinflip(request: Request):
         "balance": new_user['balance']
     })
 
-# 3. Апгрейдер (Защита: шанс никогда не выше 20%)
 @app.post("/api/game/upgrader")
 async def api_upgrader(request: Request):
     data = await request.json()
