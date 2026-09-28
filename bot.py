@@ -1,13 +1,12 @@
 import os
 import logging
 import sqlite3
-import asyncio
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton, Update
 
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN")
 CRYPTO_BOT_TOKEN = os.getenv("CRYPTO_BOT_TOKEN")
@@ -95,6 +94,7 @@ async def create_crypto_invoice_link(user_id: int, amount: float):
             return result["result"]["pay_url"]
     return None
 
+# Вебхук для оплаты CryptoBot
 @app.post("/api/cryptobot_webhook")
 async def cryptobot_webhook(request: Request):
     data = await request.json()
@@ -114,7 +114,7 @@ async def cryptobot_webhook(request: Request):
                 
     return JSONResponse({"status": "ok"})
 
-# --- ТЕЛЕГРАМ БОТ ---
+# --- ТЕЛЕГРАМ БОТ (Логика) ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -239,12 +239,18 @@ async def process_pay(callback: types.CallbackQuery):
     else:
         await callback.answer("Ошибка создания счета в CryptoBot", show_alert=True)
 
+# Вебхук, куда Telegram сам присылает сообщения боту
+@app.post("/api/telegram_webhook")
+async def telegram_webhook(request: Request):
+    json_data = await request.json()
+    update = Update.model_validate(json_data, context={"bot": bot})
+    await dp.feed_update(bot, update)
+    return {"status": "ok"}
+
+# Автоматическая установка Telegram Webhook при старте сервера
 @app.on_event("startup")
 async def on_startup():
     if bot:
-        try:
-            await bot.delete_webhook(drop_pending_updates=True)
-            asyncio.create_task(dp.start_polling(bot))
-            logging.info("Telegram bot polling started successfully!")
-        except Exception as e:
-            logging.error(f"Polling start error: {e}")
+        webhook_url = f"{WEB_APP_URL}/api/telegram_webhook"
+        await bot.set_webhook(webhook_url)
+        logging.info(f"Telegram Webhook установлен на: {webhook_url}")
