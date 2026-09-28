@@ -10,8 +10,8 @@ import uvicorn
 import asyncio
 
 # --- НАСТРОЙКИ ---
-TOKEN = "ВАШ_ТОКЕН_БОТА"  # Замените на ваш токен Telegram-бота
-CRYPTO_BOT_TOKEN = "ВАШ_ТОКЕН_CRYPTO_BOT"  # Замените на ваш токен от CryptoBot
+TOKEN = "8814841234:AAFgf-HSoq0Q8YgZOLIFgIk43hclmMdjjnc"  # Замените на ваш токен Telegram-бота
+CRYPTO_BOT_TOKEN = "639499:AANlVeyFTk4dJ7z5PJvXfPXpITIfR9VVAOf"  # Замените на ваш токен от CryptoBot
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
