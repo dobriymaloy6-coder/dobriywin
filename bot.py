@@ -134,7 +134,7 @@ async def cb_topup(callback: types.CallbackQuery):
             amount=amount_to_pay, 
             description="Пополнение баланса DobriyWin",
             paid_btn_name='callback',
-            paid_btn_url='https://t.me/ВАШ_БОТ_USERNAME'
+            paid_btn_url='https://t.me/DobriyWin_Bot'
         )
         
         # Сохраняем инвойс в базу, чтобы привязать платеж к пользователю
